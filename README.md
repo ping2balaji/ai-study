@@ -28,4 +28,15 @@ If you really want to know the python packages came as part of this uv environme
 You can check the python version and binary used for this project by running following command:  
 ```uv run python -c "import sys; print(sys.executable, sys.version)"```  
 
+## Testing your First AI code
+
+* Create .env file in project root folder
+* Add your openai api key into this file as shown below:(you can generate one from [platform.openai.com](http://platform.openai.com/))
+**OPENAI_API_KEY=sk-proj-<>**
+* Execute your 1st AI code:
+```
+cd 1_basics
+uv run python hello-world-openai.py
+```
+
 
