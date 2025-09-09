@@ -1,5 +1,8 @@
 # ai-study
 
+*Learn about AI from basics to advanced concepts.*  
+You will be able to kick-start your AI learning journey right from day one through practical code execution.
+
 ## Setup
 
 ### setup python environment
