@@ -14,8 +14,9 @@ It automatically manages:
     - Dependency resolution  
     - Lockfiles  
 
-**You can do git clone of this repository and perform following to setup same environment using the power "UV"**
+**You can install uv and do git clone of this repository and perform following to setup same environment using the power "UV"**
 ```
+curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone <repo-link>
 cd <folder>
 uv sync 
