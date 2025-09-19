@@ -230,7 +230,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--pcap", required=True, help="S1AP-only pcap used to recover nested IDs")
     ap.add_argument("--tshark", default="tshark", help="Path to tshark executable")
     args = ap.parse_args(argv)
-    # example: uv run python3 .\testcodes-ignore\group_s1ap_flows.py 
+    # example: uv run python3 .\src\group_s1ap_flows.py 
     # --csv .\testcodes-ignore\s1ap-only-10k-pkts.s1ap.csv 
     # --pcap .\testcodes-ignore\s1ap-only-10k-pkts.s1ap-only.pcapng
     

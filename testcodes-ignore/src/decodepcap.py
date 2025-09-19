@@ -115,7 +115,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--s1ap-out", help="Output S1AP-only pcapng path (default: <input>.s1ap-only.pcapng)")
     p.add_argument("--csv-out", help="Output CSV path (default: <input>.s1ap.csv)")
     args = p.parse_args(argv)
-    # example: uv run python3 .\testcodes-ignore\test_decodepcap.py .\testcodes-ignore\s1ap-only-10k-pkts.pcapng
+    # example: uv run python3 .\testcodes-ignore\decodepcap.py .\testcodes-ignore\sample-s1ap.pcapng
 
     if not os.path.exists(args.pcap):
         print(f"Input not found: {args.pcap}", file=sys.stderr)
