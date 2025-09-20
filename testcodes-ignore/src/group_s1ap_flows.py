@@ -13,13 +13,21 @@ Rules:
   fetch them per-frame from the pcap using tshark and then assign.
 
 Usage:
-  python testcodes-ignore/group_s1ap_flows.py \
+  python testcodes-ignore/src/group_s1ap_flows.py \
     --csv testcodes-ignore/s1ap-only-10k-pkts.s1ap.csv \
     --pcap testcodes-ignore/s1ap-only-10k-pkts.s1ap-only.pcapng \
     [--tshark "C:\\Program Files\\Wireshark\\tshark.exe"]
+    [--out path/to/output.json]
 
 Output:
-  Prints one line per flow: space-separated frame numbers belonging to that flow, in order.
+  Prints a JSON array to stdout and also writes it to a file named
+  'session-flows-<YYYYMMDD-HHMMSS>.json' next to the CSV (unless --out is
+  provided). Each element represents one flow with:
+  - enb_ue_s1ap_id: integer ENB UE S1AP ID
+  - mme_ue_s1ap_id: integer MME UE S1AP ID
+  - start_time: earliest frame.time_epoch in the flow (float seconds)
+  - end_time: latest frame.time_epoch in the flow (float seconds)
+  - frames: sorted list of frame numbers in this flow
 """
 
 from __future__ import annotations
@@ -33,6 +41,7 @@ import sys
 from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Tuple
 import json
+from datetime import datetime
 
 
 CSV_FIELDS = {
@@ -229,6 +238,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--csv", required=True, help="CSV exported from tshark")
     ap.add_argument("--pcap", required=True, help="S1AP-only pcap used to recover nested IDs")
     ap.add_argument("--tshark", default="tshark", help="Path to tshark executable")
+    ap.add_argument(
+        "--out",
+        help=(
+            "Output JSON path (default: session-flows-<YYYYMMDD-HHMMSS>.json next to the CSV)"
+        ),
+    )
     args = ap.parse_args(argv)
     # example: uv run python3 .\src\group_s1ap_flows.py 
     # --csv .\testcodes-ignore\s1ap-only-10k-pkts.s1ap.csv 
@@ -274,6 +289,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         start = min(times) if times else None
         end = max(times) if times else None
         result.append({
+            "enb_ue_s1ap_id": enb,
+            "mme_ue_s1ap_id": mme,
             "start_time": start,
             "end_time": end,
             "frames": frames,
@@ -282,6 +299,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Order by start time then by first frame
     result.sort(key=lambda x: (x["start_time"] if x["start_time"] is not None else float("inf"), x["frames"][0] if x["frames"] else float("inf")))
 
+    # Determine output JSON path
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    default_out = os.path.join(os.path.dirname(os.path.abspath(args.csv)) or ".", f"session-flows-{ts}.json")
+    out_path = args.out or default_out
+    try:
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2)
+        # Log to stderr to avoid corrupting stdout JSON
+        print(f"Wrote flows JSON: {out_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"Failed to write JSON file '{out_path}': {e}", file=sys.stderr)
+
+    # Still print JSON to stdout for piping/consumers
     print(json.dumps(result, indent=2))
 
     return 0

@@ -16,4 +16,9 @@ tshark.exe -r .\testcodes-ignore\s1ap-only-10k-pkts.s1ap-only.pcapng -Y "frame.n
 or for only s1ap: 
   -> tshark.exe -r .\one-flow.pcap -T json -J s1ap > one-flow.json
 or for having more control we can use jq and filter json fields:
-  -> tshark.exe -r .\one-flow.pcap -T json -J ip -J sctp -J s1ap -w one-flow-filtered.json
+  4.1  tshark.exe -r .\one-flow.pcap -T json -J ip -J ipv6 -J sctp -J s1ap > one-flow-filtered.json
+  4.2 Get-Content -Raw -Encoding Unicode .\one-flow-filtered.json |
+  Set-Content -NoNewline -Encoding utf8 .\one-flow-filtered.utf8.json
+  4.3 jq -f .\filter.jq .\one-flow-filtered.utf8.json > .\filtered.json
+
+
