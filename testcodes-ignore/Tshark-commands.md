@@ -13,3 +13,7 @@ tshark -r <in.pcap> -Y "s1ap and !(s1ap.procedureCode == 10)" -F pcapng -w <s1ap
 4) To convert frames to json and feed it to LLM for analysis:
 tshark.exe -r .\testcodes-ignore\s1ap-only-10k-pkts.s1ap-only.pcapng -Y "frame.number in {1,2,5,9}" -T json -J ip -J sctp -J s1ap > testcodes-ignore\selected3.json
 
+or for only s1ap: 
+  -> tshark.exe -r .\one-flow.pcap -T json -J s1ap > one-flow.json
+or for having more control we can use jq and filter json fields:
+  -> tshark.exe -r .\one-flow.pcap -T json -J ip -J sctp -J s1ap -w one-flow-filtered.json
