@@ -1,0 +1,18 @@
+{
+  "total_flows": 1,
+  "csv_header": "frame.number,frame.time_epoch,ip.src,ip.dst,ipv6.src,ipv6.dst,sctp.srcport,sctp.dstport,s1ap.RRC_Establishment_Cause,s1ap.ENB_UE_S1AP_ID,s1ap.MME_UE_S1AP_ID,s1ap.radioNetwork,e212.tai.mcc,e212.tai.mnc,s1ap.tAC,s1ap.CellIdentity,_ws.col.info",
+  "flows": [
+    {
+      "flow_no": 1,
+      "enb_ue_s1ap_id": 17086,
+      "mme_ue_s1ap_id": 8466,
+      "pkt_summary_csv": [
+        "\"1\",\"1758134436.341902000\",\"10.3.7.45\",\"18.8.23.13\",,,\"36412\",\"36412\",\"1\",\"17086\",,,\"310\",\"260\",\"56835\",\"0x0f308e11\",\"InitialUEMessage, Service request\"",
+        "\"2\",\"1758134436.502172000\",\"10.3.7.45\",\"18.8.23.13\",,,\"36412\",\"36412\",,\"17086\",\"8466\",,,,,,\"SACK (Ack=2312371385, Arwnd=262144) , InitialContextSetupResponse\"",
+        "\"3\",\"1758134479.361790000\",\"10.3.7.45\",\"18.8.23.13\",,,\"36412\",\"36412\",,\"17086\",\"8466\",\"21\",,,,,\"UEContextReleaseRequest [RadioNetwork-cause=radio-connection-with-ue-lost]\"",
+        "\"4\",\"1758134479.361792000\",\"18.8.23.13\",\"10.3.7.45\",,,\"36412\",\"36412\",,\"17086\",\"8466\",\"21\",,,,,\"SACK (Ack=8, Arwnd=106496) , UEContextReleaseCommand [RadioNetwork-cause=radio-connection-with-ue-lost]\"",
+        "\"5\",\"1758134479.361793000\",\"10.3.7.45\",\"18.8.23.13\",,,\"36412\",\"36412\",,\"17086\",\"8466\",,,,,,\"SACK (Ack=0, Arwnd=262144) , UEContextReleaseComplete\""
+      ]
+    }
+  ]
+}

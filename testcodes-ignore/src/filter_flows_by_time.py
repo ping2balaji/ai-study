@@ -19,14 +19,32 @@ Usage:
   python testcodes-ignore/src/filter_flows_by_time.py \
     --flows testcodes-ignore/sample-pcap/session-flows-20250920-113704.json \
     --pcap  testcodes-ignore/sample-pcap/sample-s1ap.s1ap-only.pcapng \
-    --start 2025-09-20T11:30:00Z --end 2025-09-20T11:40:00Z \
+    --start 2025-09-17T18:50:00Z --end 2025-09-17T19:00:00Z \
     [--mode contained|overlap] [--tshark "C:\\Program Files\\Wireshark\\tshark.exe"] \
-    [--out path/to/output.json]
+    [--out path/to/output.json] [--debug] [--showtime] [--showframenum]
 
 Output:
-- Writes a JSON array of filtered flows (same shape as input) to a file
-  named 'session-flows-<YYYYMMDD-HHMMSS>-filtered.json' next to the input
-  flows JSON (unless --out is provided).
+- Writes a JSON object to a file named 'session-flows-<YYYYMMDD-HHMMSS>-filtered.json' next to
+  the input flows JSON (unless --out is provided) with the following shape:
+
+  {
+    "total_flows": <int>,
+    "csv_header": "frame.number,frame.time_epoch,...,_ws.col.Info",
+    "flows": [
+      {
+        "flow_no": <int starting at 1>,
+        "enb_ue_s1ap_id": <int|null>,
+        "mme_ue_s1ap_id": <int|null>,
+        // start_time and end_time appear only when --showtime is provided
+        // "start_time": "YYYY-MM-DDTHH:MM:SS.mmmZ" | null,
+        // "end_time": "YYYY-MM-DDTHH:MM:SS.mmmZ" | null,
+        // frames appear only when --showframenum is provided
+        // "frames": [<int>, ...],
+        "pkt_summary_csv": ["<row>", ...]
+      },
+      ...
+    ]
+  }
 """
 
 from __future__ import annotations
@@ -38,7 +56,8 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+import shlex
+from typing import Dict, List, Optional, Tuple
 
 
 def have_tshark(tshark_path: str) -> bool:
@@ -150,6 +169,131 @@ def ensure_parent(path: str) -> None:
         os.makedirs(parent, exist_ok=True)
 
 
+TSHARK_SUMMARY_FIELDS = [
+    "frame.number",
+    "frame.time_epoch",
+    "ip.src",
+    "ip.dst",
+    "ipv6.src",
+    "ipv6.dst",
+    "sctp.srcport",
+    "sctp.dstport",
+    "s1ap.RRC_Establishment_Cause",
+    "s1ap.ENB_UE_S1AP_ID",
+    "s1ap.MME_UE_S1AP_ID",
+    "s1ap.radioNetwork",
+    "e212.tai.mcc",
+    "e212.tai.mnc",
+    "s1ap.tAC",
+    "s1ap.CellIdentity",
+    "_ws.col.Info",
+]
+
+
+def tshark_csv_for_frames(tshark: str, pcap: str, frames: List[int], *, debug: bool = False) -> Tuple[Optional[str], List[str]]:
+    """Return (header_line, CSV data lines) for frames from pcap using tshark.
+
+    For very large frame lists, runs multiple tshark calls and concatenates results
+    while keeping only the first header.
+    """
+    if not frames:
+        return None, []
+
+    lines_accum: List[str] = []
+    header_line: Optional[str] = None
+
+    # Chunk by command length to be safe on Windows command line limits
+    chunk: List[int] = []
+    current_len = 0
+    max_chars = 6000  # conservative within Windows cmd length (~8k)
+
+    def format_cmd_for_log(cmd: List[str]) -> str:
+        # Render command similar to cross-platform shell usage, emphasizing -E values with double quotes
+        out: List[str] = []
+        i = 0
+        while i < len(cmd):
+            arg = str(cmd[i])
+            if arg == "-E" and i + 1 < len(cmd):
+                val = str(cmd[i + 1])
+                out.append("-E")
+                out.append(f'"{val}"')
+                i += 2
+                continue
+            # Quote arguments containing spaces or braces for readability
+            if any(ch in arg for ch in [' ', '{', '}', ',']):
+                out.append(f'"{arg}"')
+            else:
+                out.append(arg)
+            i += 1
+        return " ".join(out)
+
+    def run_chunk(frames_chunk: List[int]) -> None:
+        # Use outer-scope header_line to track first header capture
+        nonlocal header_line
+        if not frames_chunk:
+            return
+        frame_list = ",".join(str(int(n)) for n in frames_chunk)
+        display_filter = f"frame.number in {{{frame_list}}}"
+        cmd = [
+            tshark,
+            "-r",
+            pcap,
+            "-Y",
+            display_filter,
+            "-T",
+            "fields",
+            "-E",
+            "header=y",
+            "-E",
+            "separator=,",
+            "-E",
+            "quote=d",
+            "-E",
+            "occurrence=f",
+        ]
+        for f in TSHARK_SUMMARY_FIELDS:
+            cmd += ["-e", f]
+        if debug:
+            cmd_str = format_cmd_for_log(cmd)
+            print(f"[DEBUG] Running tshark for {len(frames_chunk)} frames: {cmd_str}", file=sys.stderr)
+        try:
+            proc = subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except subprocess.CalledProcessError as e:
+            err = e.stderr.strip() or e.stdout.strip()
+            print(f"tshark summary failed: {err}", file=sys.stderr)
+            return
+        chunk_lines = proc.stdout.splitlines()
+        if not chunk_lines:
+            return
+        if header_line is None:
+            header_line = chunk_lines[0]
+        # Always drop the header from each chunk
+        data_only = chunk_lines[1:] if len(chunk_lines) > 1 else []
+        lines_accum.extend(data_only)
+
+    for n in frames:
+        s = str(int(n))
+        # +2 for comma/spacing in list representation overhead
+        if current_len + len(s) + 2 > max_chars and chunk:
+            run_chunk(chunk)
+            chunk = []
+            current_len = 0
+        chunk.append(int(n))
+        current_len += len(s) + 1
+    if chunk:
+        run_chunk(chunk)
+
+    return header_line, lines_accum
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Filter session flows JSON by time range.")
     ap.add_argument("--flows", required=True, help="Input flows JSON (from group_s1ap_flows.py)")
@@ -163,6 +307,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         help=(
             "Output JSON path (default: session-flows-<YYYYMMDD-HHMMSS>-filtered.json next to the flows JSON)"
         ),
+    )
+    ap.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debug logs about filtering and tshark commands",
+    )
+    ap.add_argument(
+        "--showtime",
+        action="store_true",
+        help="Include ISO UTC start_time/end_time in the output flows",
+    )
+    ap.add_argument(
+        "--showframenum",
+        action="store_true",
+        help="Include frames[] array in each output flow",
     )
     args = ap.parse_args(argv)
 
@@ -200,6 +359,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     start = float(args.start)
     end = float(args.end)
+    if args.debug:
+        print(f"[DEBUG] Filtering flows: total={len(flows)} start={start} end={end} mode={args.mode}", file=sys.stderr)
 
     def keep(flow: dict) -> bool:
         st = flow.get("start_time")
@@ -214,6 +375,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return not (en < start or st > end)
 
     filtered = [f for f in flows if keep(f)]
+    if args.debug:
+        print(f"[DEBUG] Filtered flows kept: {len(filtered)}", file=sys.stderr)
 
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     # Place output next to the flows JSON by default
@@ -223,10 +386,58 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     out_path = args.out or default_out
 
+    # Enrich with numbering and per-session CSV summaries (requires tshark)
+    if not have_tshark(args.tshark):
+        print("tshark not found; required to build pkt_summary_csv", file=sys.stderr)
+        return 2
+
+    enriched: List[dict] = []
+    csv_header_line: Optional[str] = None
+    for idx, flow in enumerate(filtered, start=1):
+        frames = flow.get("frames") or []
+        if args.debug:
+            enb = flow.get("enb_ue_s1ap_id")
+            mme = flow.get("mme_ue_s1ap_id")
+            st = flow.get("start_time")
+            en = flow.get("end_time")
+            print(f"[DEBUG] Creating flow #{idx} enb={enb} mme={mme} frames={len(frames)} start={st} end={en}", file=sys.stderr)
+        header, csv_lines = tshark_csv_for_frames(args.tshark, args.pcap, frames, debug=args.debug)
+        if csv_header_line is None and header:
+            csv_header_line = header
+        # Ensure flow_no is the first field, then original fields (except raw epoch times and optionally frames)
+        new_flow: Dict[str, object] = {"flow_no": idx}
+        excluded_keys = {"start_time", "end_time"}
+        if not args.showframenum:
+            excluded_keys.add("frames")
+        for k, v in flow.items():
+            if k not in excluded_keys:
+                new_flow[k] = v
+        # Optionally include ISO UTC times at the end
+        if args.showtime:
+            def iso_ms(v: Optional[float]) -> Optional[str]:
+                if v is None:
+                    return None
+                dt = datetime.fromtimestamp(float(v), tz=timezone.utc)
+                return dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            new_flow["start_time"] = iso_ms(flow.get("start_time"))
+            new_flow["end_time"] = iso_ms(flow.get("end_time"))
+        new_flow["pkt_summary_csv"] = csv_lines
+        enriched.append(new_flow)
+
+    # Fallback header if tshark produced none (empty flows): build from known fields
+    if csv_header_line is None:
+        csv_header_line = ",".join(TSHARK_SUMMARY_FIELDS)
+
+    result_obj = {
+        "total_flows": len(enriched),
+        "csv_header": csv_header_line,
+        "flows": enriched,
+    }
+
     try:
         ensure_parent(out_path)
         with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(filtered, f, indent=2)
+            json.dump(result_obj, f, indent=2)
         print(f"Wrote filtered flows JSON: {out_path}")
     except OSError as e:
         print(f"Failed to write JSON file '{out_path}': {e}", file=sys.stderr)
