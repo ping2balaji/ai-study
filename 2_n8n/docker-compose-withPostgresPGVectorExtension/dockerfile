@@ -1,0 +1,26 @@
+# Alpine-based n8n
+FROM docker.n8n.io/n8nio/n8n:latest
+SHELL ["/bin/sh", "-eo", "pipefail", "-c"]
+USER root
+
+# System packages (no system pip upgrades)
+RUN apk add --no-cache \
+      python3 \
+      py3-pip \
+      py3-virtualenv \
+      curl git vim tshark tzdata
+
+# Create an isolated venv for your workflows
+RUN python3 -m venv /opt/py312 \
+ && /opt/py312/bin/python -m pip install --upgrade pip setuptools wheel
+
+# (Optional) Preinstall Python deps into the venv
+# RUN /opt/py312/bin/pip install requests pandas
+
+# Handy shims for the 'node' user (what n8n runs as)
+RUN mkdir -p /home/node/.local/bin \
+ && ln -s /opt/py312/bin/python /home/node/.local/bin/python312 \
+ && ln -s /opt/py312/bin/pip    /home/node/.local/bin/pip312
+
+ENV PATH="/home/node/.local/bin:${PATH}"
+

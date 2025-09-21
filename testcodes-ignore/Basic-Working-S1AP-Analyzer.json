@@ -1,0 +1,313 @@
+{
+  "name": "Basic-Working-S1AP-Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Upload S1AP Pcap File for Analysis",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "pcapfile",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pcap,.pcapng",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "StartTime",
+              "fieldType": "date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "EndTime",
+              "fieldType": "date",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c05a75c7-a612-48a0-9bb8-53925f6e806c",
+      "name": "On form submission",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -992,
+        -192
+      ],
+      "webhookId": "46948bf6-b8de-4d43-beaa-e018ea287830"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $json.pcap_path }}",
+        "dataPropertyName": "pcapfile",
+        "options": {}
+      },
+      "id": "50ac4541-a25a-4fef-ba75-6c548b85c6da",
+      "name": "Save PCAP",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3dc60508-2d4b-4910-8153-a80f0115336c",
+              "name": "StartTimeISO",
+              "value": "={{ new Date($json[\"StartTime\"]).toISOString() }}",
+              "type": "string"
+            },
+            {
+              "id": "c5016a8d-da26-48d3-8571-eeed0fa37b72",
+              "name": "EndTimeISO",
+              "value": "={{ new Date($json[\"EndTime\"]).toISOString() }}",
+              "type": "string"
+            },
+            {
+              "id": "7b3dc0cb-f7c5-4540-a140-541089bec85c",
+              "name": "safe_filename",
+              "value": "={{ $binary.pcapfile.fileName.replace(/[^a-zA-Z0-9._-]/g, \"_\") }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -704,
+        -192
+      ],
+      "id": "61e1777d-5b82-47cc-ae2d-4cb755500277",
+      "name": "Set StartEndTime and Filenames"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6656c592-4ca6-4100-8dda-82d3d4436dcb",
+              "name": "pcap_path",
+              "value": "=/data/n8n-data/{{$json.safe_filename}}",
+              "type": "string"
+            },
+            {
+              "id": "37e8e0c0-44c3-40df-a859-0d31b12bc6cd",
+              "name": "out_path",
+              "value": "=/data/n8n-data/{{ $workflow.id }}-{{$execution.id}}.json",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -464,
+        -192
+      ],
+      "id": "d9f31813-ebc5-48aa-a9bf-e604353a09d7",
+      "name": "Set Input and Output Files"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a telecom protocol analyst. Analyze LTE S1 traffic exported(from wireshark/tshark) as JSON in following json fields:\n'total_flows': contains the total number of s1ap ue-session to be analyzed.\n'csv_header': contains the list of column header names of the CSV fields present in 'pkt_summary_csv' field.\n'flows': array containing list of s1ap ue-session details.\nEvery element of 'flows' array: contains 'flow_no' / 'enb_ue_s1ap_id' / 'mme_ue_s1ap_id' / 'pkt_summary_csv'. where 'pkt_summary_csv' field details are explained in the 'csv_header' field outside as mentioned above.\n\nThis pkt_summary_csv for each s1ap ue-session already contains only single UE-Associated s1-connection information(pair: ENB_UE_S1AP_ID, MME_UE_S1AP_ID).\nSo you need not investigate on whether all these packets in csv belong to same s1ap flow or not.\n\nGoal\n- Decide if the session’s NAS+S1AP procedures completed successfully, failed, or are incomplete. failed includes abnormal ue-context-release cause like radio-connection-with-ue-lost or released due to radio network etc. \n\nInput shape\n- CSV column headers included(in exact order): frame.number,frame.time_epoch,ip.src,ip.dst,ipv6.src,ipv6.dst,sctp.srcport,sctp.dstport,s1ap.RRC_Establishment_Cause,s1ap.ENB_UE_S1AP_ID,s1ap.MME_UE_S1AP_ID,s1ap.radioNetwork,_ws.col.info\n- S1ap Message type, NAS level ESM or EMM message types(if available) and Release-Cause(if available) are in the human-readable format embedded in last Info column of each row (e.g., “Initial UE Message”, “Downlink NAS Transport”, “Initial Context Setup”, “UE Context Release Command/Complete”, “E-RAB Setup”, \"UEContextReleaseRequest\", \"RadioNetwork-cause=radio-connection-with-ue-lost\" ...) \n- NAS hints (if present) also appear in Info (e.g., “Attach Request/Accept/Complete”, “Service Request”, “TAU/TAU Accept”).\n- Other fields may appear in Info: Cause, PLMN, TAC, ECGI.\n\nDetecting outcomes (high level)\n- Attach success: Initial UE Message (Attach Req) → NAS SMC (if visible) → Initial Context Setup (success) → (optional) E-RAB Setup (success) → Attach Accept + Attach Complete → UE Context Release (normal/inactivity).\n- Service Request success: Service Request → (optional) NAS SMC/Identification → bearer resume via Context Modification or E-RAB Setup (success) → normal/inactivity release.\n- TAU success: TAU Request → TAU Accept → (optional) Context Release with positice cause like NAS-Cause=Normal-Release in Info column.\n- S1 Handover success involves the procedures callflow packets like, HO Required/Request → HO Command → HO Notify.\n- X2 Handover success involves Path Switch Req and Path Switch Request Ack\n- Failure if UnsuccessfulOutcome/Error Indication/NAS Reject/abnormal release/abnormal cause in ue-context-release related messages like Radio-Conneciton-With-UE-Lost etc appears before completion of procedures.\n- Incomplete if the expected follow-ups don’t appear in the trace as the input given to you is the complete trace of the ue-session/s1ap-flow.\n\nPlease note that your analysis should not be limited to above \"detecting outcomes\" list only. As an LTE Packet/telecom/4g/s1ap packet analysis expert you should be able to identify any not-mentioned procedure in this prompt but are part of standard 3GPP callflow.\n\nOutput \n{\n  \"summary\": \"<procedure(s)> detected and it was <successful/failure>},\n  \"sessions\": \n    {\n\t  \"plmn\": \"mcc:mnc\"\n      \"enb_ue_s1ap_id\":\"...\",\"mme_ue_s1ap_id\":\"...\",\n      \"ip_pair\":{\"src\":\"...\",\"dst\":\"...\"},\n      \"observed_procedures\":[\"Attach\",\"Service Request\",\"TAU\",\"Handover\",...],\n      \"status\":\"success|failure|incomplete\",\n      \"failure_reason\":\"... if not success ...\",\n      \"evidence\":[\"<t> <message> ...\", \"...\"]\n    }\n  ]\n}\n\nInput:\n{{ $json.stdout }}",
+        "options": {
+          "systemMessage": "You are a telecom protocol analyst."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -432,
+        112
+      ],
+      "id": "5530a50f-0a3b-4bf4-88bf-2d948c56f629",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -512,
+        272
+      ],
+      "id": "96005a67-7f32-4b9b-911a-e296a4aeb28c",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "sZ65qk8PI747oi6I",
+          "name": "ping2balaji gpt+key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $workflow.id }}-{{ $execution.id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -368,
+        288
+      ],
+      "id": "d421d199-96fe-49a2-a4ed-64b2afa71603",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "command": "=cd /data/n8n-data/\ncd {{ $workflow.id }}-{{ $execution.id }}\ncat {{ $workflow.id }}-{{ $execution.id }}.json\n\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -704,
+        112
+      ],
+      "id": "9ce44fe2-5e66-4106-b114-f97537a27aff",
+      "name": "S1AP Flow Summary"
+    },
+    {
+      "parameters": {
+        "command": "=cd /data/n8n-data/\nmkdir {{ $workflow.id }}-{{ $execution.id }}\ncd {{ $workflow.id }}-{{ $execution.id }}\npython3 ../src/decodepcap.py {{ $json.pcap_path }} --s1ap-out {{ $workflow.id }}-{{ $execution.id }}-s1ap.pcap --csv-out {{ $workflow.id }}-{{ $execution.id }}-csv.csv\n\npython3 ../src/group_s1ap_flows.py --csv {{ $workflow.id }}-{{ $execution.id }}-csv.csv --pcap {{ $workflow.id }}-{{ $execution.id }}-s1ap.pcap --out {{ $workflow.id }}-{{ $execution.id }}-flows.json\n\n\npython3 ../src/filter_flows_by_time.py --flows {{ $workflow.id }}-{{ $execution.id }}-flows.json --pcap {{ $workflow.id }}-{{ $execution.id }}-s1ap.pcap --start {{ $json.StartTimeISO }} --end {{ $json.EndTimeISO }} --out {{ $workflow.id }}-{{ $execution.id }}.json --debug\n\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -912,
+        112
+      ],
+      "id": "2a933da7-7427-41d2-a50a-19014754a514",
+      "name": "Decode PCAP to CSV for form S1AP Flows",
+      "alwaysOutputData": false,
+      "notesInFlow": false
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Set StartEndTime and Filenames",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save PCAP": {
+      "main": [
+        [
+          {
+            "node": "Decode PCAP to CSV for form S1AP Flows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set StartEndTime and Filenames": {
+      "main": [
+        [
+          {
+            "node": "Set Input and Output Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Input and Output Files": {
+      "main": [
+        [
+          {
+            "node": "Save PCAP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S1AP Flow Summary": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode PCAP to CSV for form S1AP Flows": {
+      "main": [
+        [
+          {
+            "node": "S1AP Flow Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "134cc082-d26c-4bd0-9cde-f1de10291a79",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c79a0718a5278a3927c32cf8d777c356bdfc2d2c5f3dfb749b3c1bc91dd83d6c"
+  },
+  "id": "Z4xF9P1etJgVPnsH",
+  "tags": []
+}

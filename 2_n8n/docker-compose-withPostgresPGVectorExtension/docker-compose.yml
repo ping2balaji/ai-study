@@ -33,7 +33,8 @@ services:
       - n8n-network
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n
+    #image: docker.n8n.io/n8nio/n8n
+    build: .
     restart: always
     environment:
       - N8N_SECURE_COOKIE=false
@@ -53,7 +54,7 @@ services:
       - postgres-pgvector
     volumes:
       - n8n_storage:/home/node/.n8n
-      - /home/balaji/n8n/pcap:/data/pcap
+      - /home/balaji/n8n-data:/data/n8n-data
     depends_on:
       postgres-pgvector:
         condition: service_healthy
