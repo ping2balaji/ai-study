@@ -50,12 +50,14 @@ Output:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
+import time
 import shlex
 from typing import Dict, List, Optional, Tuple
 
@@ -294,6 +296,116 @@ def tshark_csv_for_frames(tshark: str, pcap: str, frames: List[int], *, debug: b
     return header_line, lines_accum
 
 
+def tshark_csv_map_for_frames(
+    tshark: str, pcap: str, frames: List[int], *, debug: bool = False
+) -> Tuple[Optional[str], Dict[int, str]]:
+    """Return (header_line, mapping of frame.number -> CSV line) for the given frames.
+
+    Runs tshark in as few invocations as possible by chunking long frame lists.
+    """
+    if not frames:
+        return None, {}
+
+    header_line: Optional[str] = None
+    rows_by_frame: Dict[int, str] = {}
+
+    def format_cmd_for_log(cmd: List[str]) -> str:
+        out: List[str] = []
+        i = 0
+        while i < len(cmd):
+            arg = str(cmd[i])
+            if arg == "-E" and i + 1 < len(cmd):
+                val = str(cmd[i + 1])
+                out.append("-E")
+                out.append(f'"{val}"')
+                i += 2
+                continue
+            if any(ch in arg for ch in [' ', '{', '}', ',']):
+                out.append(f'"{arg}"')
+            else:
+                out.append(arg)
+            i += 1
+        return " ".join(out)
+
+    max_chars = 6000
+    chunk: List[int] = []
+    current_len = 0
+
+    def run_chunk(frames_chunk: List[int]) -> None:
+        nonlocal header_line
+        if not frames_chunk:
+            return
+        frame_list = ",".join(str(int(n)) for n in frames_chunk)
+        display_filter = f"frame.number in {{{frame_list}}}"
+        cmd = [
+            tshark,
+            "-r",
+            pcap,
+            "-Y",
+            display_filter,
+            "-T",
+            "fields",
+            "-E",
+            "header=y",
+            "-E",
+            "separator=,",
+            "-E",
+            "quote=d",
+            "-E",
+            "occurrence=f",
+        ]
+        for f in TSHARK_SUMMARY_FIELDS:
+            cmd += ["-e", f]
+        if debug:
+            print(f"[DEBUG] Running tshark union chunk ({len(frames_chunk)} frames): {format_cmd_for_log(cmd)}", file=sys.stderr)
+        try:
+            proc = subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except subprocess.CalledProcessError as e:
+            err = e.stderr.strip() or e.stdout.strip()
+            print(f"tshark summary failed: {err}", file=sys.stderr)
+            return
+        lines = proc.stdout.splitlines()
+        if not lines:
+            return
+        if header_line is None:
+            header_line = lines[0]
+        data_lines = lines[1:] if len(lines) > 1 else []
+        # Map each CSV row by its frame.number (first column)
+        for line in data_lines:
+            try:
+                # Robust CSV parse for the first column
+                row = next(csv.reader([line], delimiter=",", quotechar='"'))
+                if not row:
+                    continue
+                fno = int(row[0].strip().strip('"')) if row[0] else None
+            except Exception:
+                continue
+            if fno is None:
+                continue
+            rows_by_frame[fno] = line
+
+    for n in frames:
+        s = str(int(n))
+        if current_len + len(s) + 2 > max_chars and chunk:
+            run_chunk(chunk)
+            chunk = []
+            current_len = 0
+        chunk.append(int(n))
+        current_len += len(s) + 1
+    if chunk:
+        run_chunk(chunk)
+
+    return header_line, rows_by_frame
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Filter session flows JSON by time range.")
     ap.add_argument("--flows", required=True, help="Input flows JSON (from group_s1ap_flows.py)")
@@ -364,7 +476,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     start = float(args.start)
     end = float(args.end)
     if args.debug:
-        print(f"[DEBUG] Filtering flows: total={len(flows)} start={start} end={end} mode={args.mode}", file=sys.stderr)
+        start_iso = datetime.fromtimestamp(start, tz=timezone.utc).isoformat()
+        end_iso = datetime.fromtimestamp(end, tz=timezone.utc).isoformat()
+        print(f"[DEBUG] Filtering flows: total={len(flows)} start={start} ({start_iso}) end={end} ({end_iso}) mode={args.mode}", file=sys.stderr)
 
     def keep(flow: dict) -> bool:
         st = flow.get("start_time")
@@ -390,13 +504,41 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     out_path = args.out or default_out
 
-    # Enrich with numbering and per-session CSV summaries (requires tshark)
-    if not have_tshark(args.tshark):
-        print("tshark not found; required to build pkt_summary_csv", file=sys.stderr)
-        return 2
+    overall_t0 = time.perf_counter()
+    if args.debug:
+        human_now = datetime.now(timezone.utc).isoformat()
+        print(f"[DEBUG] Start building output at {human_now}", file=sys.stderr)
+
+    # Enrich with numbering and per-session CSV summaries (requires tshark if frames present)
+    # Build union of frames across all filtered flows
+    union_frames: List[int] = []
+    if filtered:
+        union_set = set()
+        for f in filtered:
+            for n in (f.get("frames") or []):
+                try:
+                    union_set.add(int(n))
+                except Exception:
+                    continue
+        union_frames = sorted(union_set)
+    if args.debug:
+        print(f"[DEBUG] Filtered flows kept: {len(filtered)}; union frames: {len(union_frames)}", file=sys.stderr)
+
+    csv_header_line: Optional[str] = None
+    rows_by_frame: Dict[int, str] = {}
+    if union_frames:
+        if not have_tshark(args.tshark):
+            print("tshark not found; required to build pkt_summary_csv", file=sys.stderr)
+            return 2
+        t0 = time.perf_counter()
+        csv_header_line, rows_by_frame = tshark_csv_map_for_frames(
+            args.tshark, args.pcap, union_frames, debug=args.debug
+        )
+        t1 = time.perf_counter()
+        if args.debug:
+            print(f"[DEBUG] Built frame->CSV map in {t1 - t0:.3f}s (rows={len(rows_by_frame)})", file=sys.stderr)
 
     enriched: List[dict] = []
-    csv_header_line: Optional[str] = None
     for idx, flow in enumerate(filtered, start=1):
         frames = flow.get("frames") or []
         if args.debug:
@@ -405,9 +547,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             st = flow.get("start_time")
             en = flow.get("end_time")
             print(f"[DEBUG] Creating flow #{idx} enb={enb} mme={mme} frames={len(frames)} start={st} end={en}", file=sys.stderr)
-        header, csv_lines = tshark_csv_for_frames(args.tshark, args.pcap, frames, debug=args.debug)
-        if csv_header_line is None and header:
-            csv_header_line = header
+        # Assemble CSV rows for this flow from the union map
+        csv_lines = [rows_by_frame[n] for n in frames if n in rows_by_frame]
         # Ensure flow_no is the first field, then original fields (except raw epoch times and optionally frames)
         new_flow: Dict[str, object] = {"flow_no": idx}
         excluded_keys = {"start_time", "end_time"}
@@ -446,6 +587,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     except OSError as e:
         print(f"Failed to write JSON file '{out_path}': {e}", file=sys.stderr)
         return 1
+
+    if args.debug:
+        overall_t1 = time.perf_counter()
+        human_end = datetime.now(timezone.utc).isoformat()
+        print(f"[DEBUG] Finished at {human_end}; total elapsed {overall_t1 - overall_t0:.3f}s", file=sys.stderr)
 
     return 0
 
