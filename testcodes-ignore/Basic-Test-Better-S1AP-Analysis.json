@@ -1,0 +1,622 @@
+{
+  "name": "Basic-Test-S1AP-Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Upload S1AP Pcap File for Analysis",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "pcapfile",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pcap,.pcapng",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "StartDate",
+              "fieldType": "date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "StartTime",
+              "placeholder": "HH:SS",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "EndDate",
+              "fieldType": "date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "EndTime",
+              "placeholder": "HH:SS",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "respondWithOptions": {
+            "values": {
+              "respondWith": "redirect",
+              "redirectUrl": "http://192.168.201.88:5678/webhook/results"
+            }
+          }
+        }
+      },
+      "id": "5b1ef1ce-c082-418b-864d-109d1ae2fe59",
+      "name": "On form submission",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -992,
+        -192
+      ],
+      "webhookId": "4cab15ba-57d4-43d6-98f1-be941fce5340"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $json.pcap_path }}",
+        "dataPropertyName": "pcapfile",
+        "options": {}
+      },
+      "id": "b0b6f1a1-80e6-474c-a4b4-4ba34e43e156",
+      "name": "Save PCAP",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6656c592-4ca6-4100-8dda-82d3d4436dcb",
+              "name": "pcap_path",
+              "value": "=/data/n8n-data/{{$json.safe_filename}}",
+              "type": "string"
+            },
+            {
+              "id": "37e8e0c0-44c3-40df-a859-0d31b12bc6cd",
+              "name": "out_path",
+              "value": "=/data/n8n-data/{{ $workflow.id }}-{{$execution.id}}.json",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -464,
+        -192
+      ],
+      "id": "132cb56b-33a3-47a3-b09f-907e3fe8f3ae",
+      "name": "Set Input and Output Files"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a telecom protocol analyst. Analyze LTE S1 traffic exported(from wireshark/tshark) as JSON in following json fields:\n'total_flows': contains the total number of s1ap ue-session to be analyzed.\n'csv_header': contains the list of column header names of the CSV fields present in 'pkt_summary_csv' field.\n'flows': array containing list of s1ap ue-session details.\nEvery element of 'flows' array: contains 'flow_no' / 'enb_ue_s1ap_id' / 'mme_ue_s1ap_id' / 'pkt_summary_csv'. where 'pkt_summary_csv' field details are explained in the 'csv_header' field outside as mentioned above.\n\nThis pkt_summary_csv for each s1ap ue-session already contains only single UE-Associated s1-connection information(pair: ENB_UE_S1AP_ID, MME_UE_S1AP_ID).\nSo you need not investigate on whether all these packets in csv belong to same s1ap flow or not.\n\nGoal\n- Decide if the session’s NAS+S1AP procedures completed successfully, failed, or are incomplete. failed includes abnormal ue-context-release cause like radio-connection-with-ue-lost or released due to radio network etc. \n\nInput shape\n- CSV column headers included(in exact order): frame.number,frame.time_epoch,ip.src,ip.dst,ipv6.src,ipv6.dst,sctp.srcport,sctp.dstport,s1ap.RRC_Establishment_Cause,s1ap.ENB_UE_S1AP_ID,s1ap.MME_UE_S1AP_ID,s1ap.radioNetwork,_ws.col.info\n- S1ap Message type, NAS level ESM or EMM message types(if available) and Release-Cause(if available) are in the human-readable format embedded in last Info column of each row (e.g., “Initial UE Message”, “Downlink NAS Transport”, “Initial Context Setup”, “UE Context Release Command/Complete”, “E-RAB Setup”, \"UEContextReleaseRequest\", \"RadioNetwork-cause=radio-connection-with-ue-lost\" ...) \n- NAS hints (if present) also appear in Info (e.g., “Attach Request/Accept/Complete”, “Service Request”, “TAU/TAU Accept”).\n- Other fields may appear in Info: Cause, PLMN, TAC, ECGI.\n\nDetecting outcomes (high level)\n- Attach success: Initial UE Message (Attach Req) → NAS SMC (if visible) → Initial Context Setup (success) → (optional) E-RAB Setup (success) → Attach Accept + Attach Complete → UE Context Release (normal/inactivity).\n- Service Request success: Service Request → (optional) NAS SMC/Identification → bearer resume via Context Modification or E-RAB Setup (success) → normal/inactivity release.\n- TAU success: TAU Request → TAU Accept → (optional) Context Release with positice cause like NAS-Cause=Normal-Release in Info column.\n- S1 Handover success involves the procedures callflow packets like, HO Required/Request → HO Command → HO Notify.\n- X2 Handover success involves Path Switch Req and Path Switch Request Ack\n- Failure if UnsuccessfulOutcome/Error Indication/NAS Reject/abnormal release/abnormal cause in ue-context-release related messages like Radio-Conneciton-With-UE-Lost etc appears before completion of procedures.\n- Incomplete if the expected follow-ups don’t appear in the trace as the input given to you is the complete trace of the ue-session/s1ap-flow.\n\nPlease note that your analysis should not be limited to above \"detecting outcomes\" list only. As an LTE Packet/telecom/4g/s1ap packet analysis expert you should be able to identify any not-mentioned procedure in this prompt but are part of standard 3GPP callflow.\n\nOutput \n{\n  \"summary\": \"Total S1AP Flows Analysed: <total-flow-count>. Success: <successful-flows-count> Failure: <failure-flows-count>\",\n  \"sessions\":[ \n    {\n\t  \"flow_number\": \"exact <flownumber> matches with the input\"\n\t  \"summary\": \"<procedure(s)> detected and it was <successful/failure>}\"\n\t  \"plmn\": \"mcc:mnc\"\n      \"enb_ue_s1ap_id\":\"...\",\"mme_ue_s1ap_id\":\"...\",\n      \"ip_pair\":{\"src\":\"...\",\"dst\":\"...\"},\n      \"observed_procedures\":[\"Attach\",\"Service Request\",\"TAU\",\"Handover\",...],\n      \"status\":\"success|failure|incomplete\",\n      \"failure_reason\":\"... if not success ...\",\n      \"evidence\":[\"<t> <message> ...\", \"...\"]\n\t  \"frames\":[<frame numbers for this session>]\n    }\n  ]\n}\n\nInput:\n{{ $('output all flows').item.json.stdout }}",
+        "options": {
+          "systemMessage": "You are a telecom protocol analyst."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -784,
+        288
+      ],
+      "id": "79ff7e35-55e6-481a-84da-40fbbbe202ef",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -480,
+        304
+      ],
+      "id": "39c7e6ec-1f57-4973-a618-d49833f9ff4c",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "sZ65qk8PI747oi6I",
+          "name": "ping2balaji gpt+key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $workflow.id }}-{{ $execution.id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -288,
+        304
+      ],
+      "id": "1fe944a7-ac46-49eb-870c-c34dea49e5ed",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "command": "=cd /data/n8n-data/\nmkdir {{ $workflow.id }}-{{ $execution.id }}\ncd {{ $workflow.id }}-{{ $execution.id }}\npython3 ../src/decodepcap.py {{ $json.pcap_path }} --s1ap-out {{ $workflow.id }}-{{ $execution.id }}-s1ap.pcap --csv-out {{ $workflow.id }}-{{ $execution.id }}-csv.csv\n\npython3 ../src/group_s1ap_flows.py --csv {{ $workflow.id }}-{{ $execution.id }}-csv.csv --pcap {{ $workflow.id }}-{{ $execution.id }}-s1ap.pcap --out {{ $workflow.id }}-{{ $execution.id }}-flows.json --start {{ $('Set Input and Output Files').item.json.StartDateTime }} --end {{ $('Set Input and Output Files').item.json.EndDataTime }}\n\n\npython3 ../src/filter_flows_by_time.py --flows {{ $workflow.id }}-{{ $execution.id }}-flows.json --pcap {{ $workflow.id }}-{{ $execution.id }}-s1ap.pcap --start {{ $('Set Input and Output Files').item.json.StartDateTime }} --end {{ $('Set Input and Output Files').item.json.EndDataTime }} --out {{ $workflow.id }}-{{ $execution.id }}.json --debug\n\n\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -912,
+        64
+      ],
+      "id": "86b2568b-526b-4211-b507-33bc184e6a6d",
+      "name": "Decode PCAP to CSV for form S1AP Flows",
+      "alwaysOutputData": false,
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull meta from earlier node\nconst meta = $node[\"Set Safefilename\"].json;\n// Pull AI text from the AI Agent node's output (robust extraction)\nconst aiOut = $node[\"AI Agent\"].json;\nconst ai =\n  aiOut.output ??\n  aiOut.text ??\n  (aiOut.choices && aiOut.choices[0]?.message?.content) ??\n  JSON.stringify($json, null, 2); // fallback to whatever came in\n\nconst start = meta.StartDateTime ?? '';\nconst end   = meta.EndDateTime   ?? '';\nconst file  = meta.safe_filename ?? '';\n\nconst html = `\n<!doctype html><html><head><meta charset=\"utf-8\"/>\n<title>S1AP PCAP Analysis</title>\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>\n<style>body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 16px;line-height:1.6}.card{border:1px solid #e5e7eb;border-radius:16px;padding:24px;box-shadow:0 2px 10px rgba(0,0,0,.03)}h1{margin:0 0 8px}.muted{color:#6b7280;font-size:14px}</style>\n</head><body><div class=\"card\">\n<h1>AI Analysis</h1>\n<div class=\"muted\">File: oneflow-failure.pcapng · Window: 2025-09-17T00:00:00.000Z → 2025-09-19T00:00:00.000Z</div>\n<hr style=\"margin:16px 0;border:0;border-top:1px solid #e5e7eb\">\n<div>${String(ai).replace(/\\n/g,'<br/>')}</div></div></body></html>`;\nreturn { html };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -928,
+        496
+      ],
+      "id": "3ce44912-95be-4cba-a661-f846d07babf7",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/n8n-data/final.html",
+        "dataPropertyName": "finalhtml",
+        "options": {
+          "append": false
+        }
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -368,
+        496
+      ],
+      "id": "840a9478-ec0e-46b3-8226-07b8c94a09e1",
+      "name": "Read/Write Files from Disk"
+    },
+    {
+      "parameters": {
+        "content": "## S1AP Pcap Analysis\n",
+        "height": 976,
+        "width": 1296,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1072,
+        -288
+      ],
+      "typeVersion": 1,
+      "id": "b0500883-1a1c-4b29-9074-992724128089",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "path": "42ef096c-14cf-4851-844a-33b964dcc660",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        320,
+        -192
+      ],
+      "id": "e1b1dbd4-0eb0-4577-bc9e-8ed451ed4e9d",
+      "name": "Webhook",
+      "webhookId": "42ef096c-14cf-4851-844a-33b964dcc660"
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ '/data/n8n-data/' + 'final' + '.html' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        528,
+        -192
+      ],
+      "id": "6437a23d-c23b-44ba-ae5b-42d0c894c1f0",
+      "name": "Read/Write Files from Disk1"
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        736,
+        -192
+      ],
+      "id": "a3ffd1e6-e70e-49bf-b785-d9a441fc9bba",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "html",
+        "binaryPropertyName": "finalhtml",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        -640,
+        496
+      ],
+      "id": "2f7b3a47-0b75-4ba3-8e85-224243cf72e1",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "content": "## Webhook to post results back\n",
+        "height": 288,
+        "width": 624
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        304,
+        -256
+      ],
+      "typeVersion": 1,
+      "id": "1cd271e2-24f8-4a94-94c1-fbb84fe1db5f",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7b3dc0cb-f7c5-4540-a140-541089bec85c",
+              "name": "safe_filename",
+              "value": "={{ $binary.pcapfile.fileName.replace(/[^a-zA-Z0-9._-]/g, \"_\") }}",
+              "type": "string"
+            },
+            {
+              "id": "33a168e3-ae7e-41c6-b201-f954ee09928a",
+              "name": "StartDateTime",
+              "value": "={{ $json.StartDate }}T{{ $json.StartTime }}:00Z",
+              "type": "string"
+            },
+            {
+              "id": "1cc0c74e-070a-46ed-a017-e2b9439727a9",
+              "name": "EndDataTime",
+              "value": "={{ $json.EndDate }}T{{ $json.EndTime }}:00Z",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -752,
+        -192
+      ],
+      "id": "13977d71-9e19-4429-86b7-5eb4777e1f1c",
+      "name": "Set Safefilename"
+    },
+    {
+      "parameters": {
+        "command": "=cd /data/n8n-data/\ncd {{ $workflow.id }}-{{ $execution.id }}\ncat {{ $workflow.id }}-{{ $execution.id }}.json"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -672,
+        64
+      ],
+      "id": "92e5b664-07b7-4330-bef8-fcd6d74a3efb",
+      "name": "output all flows"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json.stdout }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -480,
+        64
+      ],
+      "id": "e352f2e7-ea32-4978-8679-6f80ccf57ce3",
+      "name": "Convert to JSON"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.total_flows }}",
+                    "rightValue": 500,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gt"
+                    },
+                    "id": "96ed321f-3329-48db-8861-c61c3dadef19"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Don't Proceed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8520a754-1d37-4436-829d-b2a3745d6ec5",
+                    "leftValue": "={{ $json.total_flows }}",
+                    "rightValue": 500,
+                    "operator": {
+                      "type": "number",
+                      "operation": "lte"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "OK"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -272,
+        64
+      ],
+      "id": "5355f2f7-44c2-4a2a-8d55-09f12a320432",
+      "name": "Switch"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        16
+      ],
+      "id": "941ad203-61d3-465c-aa2a-613545b710d1",
+      "name": "No Operation, do nothing"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Set Safefilename",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save PCAP": {
+      "main": [
+        [
+          {
+            "node": "Decode PCAP to CSV for form S1AP Flows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Input and Output Files": {
+      "main": [
+        [
+          {
+            "node": "Save PCAP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        []
+      ]
+    },
+    "Decode PCAP to CSV for form S1AP Flows": {
+      "main": [
+        [
+          {
+            "node": "output all flows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        []
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Safefilename": {
+      "main": [
+        [
+          {
+            "node": "Set Input and Output Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "output all flows": {
+      "main": [
+        [
+          {
+            "node": "Convert to JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to JSON": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "942a9acd-8b28-4b40-8be7-2783e6f7af37",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "99b1b372e11512afbc48dc793f25c09c2d0ef3da59aea3dc6aa6fd4b57691f66"
+  },
+  "id": "a5pfRa6OOAaDNUDQ",
+  "tags": []
+}
