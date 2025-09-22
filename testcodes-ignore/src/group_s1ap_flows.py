@@ -20,9 +20,11 @@ Usage:
     [--out path/to/output.json]
 
 Output:
-  Prints a JSON array to stdout and also writes it to a file named
+  Prints a JSON object to stdout and also writes it to a file named
   'session-flows-<YYYYMMDD-HHMMSS>.json' next to the CSV (unless --out is
-  provided). Each element represents one flow with:
+  provided) with:
+  - total_flows: total number of flows
+  - flows: array where each element represents one flow with:
   - enb_ue_s1ap_id: integer ENB UE S1AP ID
   - mme_ue_s1ap_id: integer MME UE S1AP ID
   - start_time: earliest frame.time_epoch in the flow (float seconds)
@@ -303,16 +305,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     default_out = os.path.join(os.path.dirname(os.path.abspath(args.csv)) or ".", f"session-flows-{ts}.json")
     out_path = args.out or default_out
+    out_obj = {
+        "total_flows": len(result),
+        "flows": result,
+    }
     try:
         with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2)
+            json.dump(out_obj, f, indent=2)
         # Log to stderr to avoid corrupting stdout JSON
         print(f"Wrote flows JSON: {out_path}", file=sys.stderr)
     except OSError as e:
         print(f"Failed to write JSON file '{out_path}': {e}", file=sys.stderr)
 
     # Still print JSON to stdout for piping/consumers
-    print(json.dumps(result, indent=2))
+    print(json.dumps(out_obj, indent=2))
 
     return 0
 

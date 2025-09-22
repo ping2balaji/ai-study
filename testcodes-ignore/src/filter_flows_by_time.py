@@ -2,7 +2,7 @@
 Filter session flows by a time range.
 
 Inputs:
-- Flows JSON produced by group_s1ap_flows.py
+- Flows JSON produced by group_s1ap_flows.py (either an array or an object with a 'flows' array)
 - S1AP-only pcap (optional for filling missing times)
 - Start and end time bounds
 
@@ -337,12 +337,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     with open(args.flows, "r", encoding="utf-8") as f:
         try:
-            flows: List[dict] = json.load(f)
+            data = json.load(f)
         except json.JSONDecodeError as e:
             print(f"Invalid JSON in flows file: {e}", file=sys.stderr)
             return 2
-    if not isinstance(flows, list):
-        print("Flows JSON root must be an array", file=sys.stderr)
+    if isinstance(data, dict) and isinstance(data.get("flows"), list):
+        flows: List[dict] = data["flows"]
+    elif isinstance(data, list):
+        flows = data
+    else:
+        print("Flows JSON must be an array or an object with a 'flows' array", file=sys.stderr)
         return 2
 
     # Ensure all flows have start/end times. If not, try to fill using tshark + pcap
