@@ -18,6 +18,7 @@ Usage:
     --pcap testcodes-ignore/s1ap-only-10k-pkts.s1ap-only.pcapng \
     [--tshark "C:\\Program Files\\Wireshark\\tshark.exe"]
     [--out path/to/output.json]
+    [--start <epoch|ISO8601>] [--end <epoch|ISO8601>]
 
 Output:
   Prints a JSON object to stdout and also writes it to a file named
@@ -30,6 +31,11 @@ Output:
   - start_time: earliest frame.time_epoch in the flow (float seconds)
   - end_time: latest frame.time_epoch in the flow (float seconds)
   - frames: sorted list of frame numbers in this flow
+
+If --start and --end are provided, only flows fully contained within that
+time range are kept (start_time >= START and end_time <= END). START/END
+accept epoch seconds or ISO 8601 (e.g., 2025-09-17T18:40:00Z). Naive
+datetimes are treated as UTC.
 """
 
 from __future__ import annotations
@@ -43,7 +49,7 @@ import sys
 from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Tuple
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 CSV_FIELDS = {
@@ -74,6 +80,31 @@ def _to_int(s: str) -> Optional[int]:
 
 def have_tshark(tshark_path: str) -> bool:
     return shutil.which(tshark_path) is not None
+
+
+def parse_time(value: str) -> float:
+    """Parse time as epoch seconds (float) or ISO 8601 string.
+
+    ISO examples: 2025-09-17T18:40:00Z, 2025-09-17T18:40:00+00:00
+    Naive datetimes are treated as UTC.
+    """
+    s = str(value).strip()
+    # numeric epoch?
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"Invalid time format: '{value}'. Use epoch seconds or ISO 8601."
+        )
 
 
 def get_available_fields(tshark: str) -> set:
@@ -246,6 +277,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             "Output JSON path (default: session-flows-<YYYYMMDD-HHMMSS>.json next to the CSV)"
         ),
     )
+    ap.add_argument("--start", type=parse_time, help="Start time (epoch seconds or ISO 8601)")
+    ap.add_argument("--end", type=parse_time, help="End time (epoch seconds or ISO 8601)")
     args = ap.parse_args(argv)
     # example: uv run python3 .\src\group_s1ap_flows.py 
     # --csv .\testcodes-ignore\s1ap-only-10k-pkts.s1ap.csv 
@@ -301,13 +334,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Order by start time then by first frame
     result.sort(key=lambda x: (x["start_time"] if x["start_time"] is not None else float("inf"), x["frames"][0] if x["frames"] else float("inf")))
 
+    # Optional time filtering if both --start and --end are provided
+    if (args.start is None) ^ (args.end is None):
+        print("Provide both --start and --end to filter by time", file=sys.stderr)
+        return 2
+    filtered = result
+    if args.start is not None and args.end is not None:
+        start_bound = float(args.start)
+        end_bound = float(args.end)
+        filtered = [
+            f for f in result
+            if f.get("start_time") is not None and f.get("end_time") is not None
+            and f["start_time"] >= start_bound and f["end_time"] <= end_bound
+        ]
+
     # Determine output JSON path
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     default_out = os.path.join(os.path.dirname(os.path.abspath(args.csv)) or ".", f"session-flows-{ts}.json")
     out_path = args.out or default_out
     out_obj = {
-        "total_flows": len(result),
-        "flows": result,
+        "total_flows": len(filtered),
+        "flows": filtered,
     }
     try:
         with open(out_path, "w", encoding="utf-8") as f:
