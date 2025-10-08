@@ -27,7 +27,7 @@ This example workflow illustrates:
 
 To start n8n with PostgreSQL and pgvector extension, simply run docker-compose by executing the following command in the current folder.
 
-**IMPORTANT:** But before you do that change the default users and passwords in the [`.env`](.env) file!
+**IMPORTANT:** But before you do that change the default users and passwords in the [`.env`](.env) file! Rename/Copy the sample.env file to .env file.
 
 ```
 docker-compose up -d
