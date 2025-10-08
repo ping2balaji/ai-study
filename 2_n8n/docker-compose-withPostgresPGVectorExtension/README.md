@@ -30,6 +30,8 @@ To start n8n with PostgreSQL and pgvector extension, simply run docker-compose b
 **IMPORTANT:** But before you do that change the default users and passwords in the [`.env`](.env) file! Rename/Copy the sample.env file to .env file.
 
 ```
+Rename/Copy the sample.env file to .env file and update username/passwords here
+chmod 0644 init-data.sh
 docker-compose up -d
 ```
 
@@ -67,4 +69,8 @@ The PostgreSQL instance is exposed on port 15432 (to avoid conflicts with any lo
 
 ```
 psql -h localhost -p 15432 -U [POSTGRES_USER] -d [POSTGRES_DB]
+```
+Sometime if the db username/password not initialized properly try doing below to recreate from scratch but this will wipe-out complete psql db entries so use with caution:
+```
+docker volume rm <docker-compose-name>_pgvector_storage
 ```
