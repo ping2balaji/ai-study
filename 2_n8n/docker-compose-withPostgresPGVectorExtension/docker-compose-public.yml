@@ -1,0 +1,83 @@
+version: '3.8'
+
+volumes:
+  pgvector_storage:
+  n8n_storage:
+  caddy_data:
+  caddy_config:
+
+networks:
+  n8n-network:
+    driver: bridge
+
+services:
+  postgres-pgvector:
+    image: pgvector/pgvector:pg17
+    container_name: postgres-pgvector
+    ports:
+      - 15432:5432
+    restart: always
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+      - POSTGRES_NON_ROOT_USER
+      - POSTGRES_NON_ROOT_PASSWORD
+    volumes:
+      - pgvector_storage:/var/lib/postgresql/data
+      - ./init-data.sh:/docker-entrypoint-initdb.d/init-data.sh
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - n8n-network
+
+  n8n:
+    #image: docker.n8n.io/n8nio/n8n
+    build: .
+    restart: always
+    environment:
+      - N8N_HOST=35.226.249.172
+      - N8N_PROTOCOL=https
+      - N8N_EDITOR_BASE_URL=https://35.226.249.172/
+      - WEBHOOK_URL=https://35.226.249.172/
+      - N8N_SECURE_COOKIE=true
+      #- N8N_SECURE_COOKIE=false
+      - GENERIC_TIMEZONE=Asia/Calcutta
+      - TZ=Asia/Calcutta
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres-pgvector
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_NON_ROOT_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_NON_ROOT_PASSWORD}
+    #ports:
+        #- 5678:5678
+    links:
+      - postgres-pgvector
+    volumes:
+      - n8n_storage:/home/node/.n8n
+      - /root/balaji/n8n-data:/data/n8n-data
+    depends_on:
+      postgres-pgvector:
+        condition: service_healthy
+    networks:
+      - n8n-network
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - n8n-network
+

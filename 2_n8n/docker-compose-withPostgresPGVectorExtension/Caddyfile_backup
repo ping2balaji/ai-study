@@ -1,0 +1,25 @@
+{
+    # Global debug settings
+    debug
+    log {
+        level DEBUG
+    }
+}
+
+
+# Serve TLS for any host/IP using the internal CA
+:443 {
+  tls internal {
+    on_demand
+  }
+  encode zstd gzip
+  reverse_proxy n8n:5678
+  log {
+      level DEBUG
+  }
+}
+
+# Redirect any HTTP to HTTPS
+:80 {
+  redir https://{host}{uri} permanent
+}

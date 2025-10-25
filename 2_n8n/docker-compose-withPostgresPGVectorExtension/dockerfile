@@ -15,7 +15,7 @@ RUN python3 -m venv /opt/py312 \
  && /opt/py312/bin/python -m pip install --upgrade pip setuptools wheel
 
 # (Optional) Preinstall Python deps into the venv
-# RUN /opt/py312/bin/pip install requests pandas
+RUN /opt/py312/bin/pip install requests pandas
 
 # Handy shims for the 'node' user (what n8n runs as)
 RUN mkdir -p /home/node/.local/bin \
