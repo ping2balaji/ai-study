@@ -6,7 +6,9 @@ from bs4 import BeautifulSoup as bs
 PROCESS_ENDPOINT = "https://chartink.com/screener/process"
 SCAN_REFERER = "https://chartink.com/screener/"
 SCAN_CLAUSE = "( {33489} ( [0] 15 minute close >= weekly min( 4 , weekly low ) * 1.01 and [0] 15 minute close <= weekly min( 4 , weekly low ) * 1.05 and( {33489} ( ( {33489} ( [0] 15 minute rsi( 7 ) > 88 and [ -1 ] 15 minute rsi( 7 ) <= 88 and [0] 15 minute sma( [0] 15 minute volume , 20 ) > [-1] 15 minute sma( [0] 15 minute volume , 20 ) ) ) or( {33489} ( [-1] 15 minute rsi( 7 ) > 88 and [ -2 ] 15 minute rsi( 7 ) <= 88 and [-1] 15 minute sma( [0] 15 minute volume , 20 ) > [-2] 15 minute sma( [0] 15 minute volume , 20 ) ) ) or( {33489} ( [-2] 15 minute rsi( 7 ) > 88 and [ -3 ] 15 minute rsi( 7 ) <= 88 and [-2] 15 minute sma( [0] 15 minute volume , 20 ) > [-3] 15 minute sma( [0] 15 minute volume , 20 ) ) ) or( {33489} ( [-3] 15 minute rsi( 7 ) > 88 and [ -4 ] 15 minute rsi( 7 ) <= 88 and [-3] 15 minute sma( [0] 15 minute volume , 20 ) > [-4] 15 minute sma( [0] 15 minute volume , 20 ) ) ) or( {33489} ( [-4] 15 minute rsi( 7 ) > 88 and [ -5 ] 15 minute rsi( 7 ) <= 88 and [-4] 15 minute sma( [0] 15 minute volume , 20 ) > [-5] 15 minute sma( [0] 15 minute volume , 20 ) ) ) or( {33489} ( [-5] 15 minute rsi( 7 ) > 88 and [ -6 ] 15 minute rsi( 7 ) <= 88 and [-5] 15 minute sma( [0] 15 minute volume , 20 ) > [-6] 15 minute sma( [0] 15 minute volume , 20 ) ) ) or( {33489} ( [-6] 15 minute rsi( 7 ) > 88 and [ -7 ] 15 minute rsi( 7 ) <= 88 and [-6] 15 minute sma( [0] 15 minute volume , 20 ) > [-7] 15 minute sma( [0] 15 minute volume , 20 ) ) ) ) ) ) )"
-
+# Above scan_clause can be obtained from the above process_endpoint url's payload 
+# when you do inspect/dev-tools in network tab from browser in ur chartink page.
+# reference: https://medium.com/@akshaybagal/automate-google-spreadsheets-with-chartink-scanner-data-using-python-and-google-sheets-api-81248a45e948
 
 def get_csrf_token(session: requests.Session) -> str:
     """Return CSRF token from screener landing page."""
