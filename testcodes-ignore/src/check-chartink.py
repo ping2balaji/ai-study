@@ -1,4 +1,5 @@
 import datetime
+import json
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup as bs
@@ -49,12 +50,37 @@ def build_dataframe(scan_payload: dict) -> pd.DataFrame:
     return df
 
 
+def format_output(df: pd.DataFrame) -> str:
+    """Return JSON string containing symbol names from the dataframe."""
+    if df.empty:
+        payload = {
+            "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "symbols": [],
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+    candidates = ("nsecode", "symbol", "name")
+    symbol_column = next((col for col in candidates if col in df.columns), None)
+    if symbol_column is None:
+        raise RuntimeError(
+            f"Unable to locate symbol column; available columns: {list(df.columns)}"
+        )
+    symbols = [value for value in df[symbol_column].dropna().astype(str)]
+    payload = {
+        "generated_at": df["time_stamp"].iat[0]
+        if not df.empty
+        else datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "symbols": symbols,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def main() -> None:
     with requests.Session() as session:
         csrf_token = get_csrf_token(session)
         scan_payload = fetch_scan_payload(session, csrf_token)
         df = build_dataframe(scan_payload)
-        print(df)
+        print(format_output(df))
 
 
 if __name__ == "__main__":

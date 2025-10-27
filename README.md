@@ -41,5 +41,8 @@ You can check the python version and binary used for this project by running fol
 cd 1_basics
 uv run python 1_hello-world-openai.py
 ```
-
-
+* Note:
+```
+If some dependant packages are not installed and throwing error while running, you can reinstall using following command(for example) and try again:
+uv pip install --force-reinstall pandas python-dateutil pytz mplfinance
+```

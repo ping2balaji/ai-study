@@ -8,5 +8,9 @@ dependencies = [
     "gradio>=5.44.1",
     "langchain>=0.3.27",
     "langchain-community>=0.3.29",
+    "mplfinance>=0.12.10b0",
     "openai>=1.106.1",
+    "pandas>=2.3.2",
+    "python-dateutil>=2.9.0.post0",
+    "pytz>=2025.2",
 ]
