@@ -502,7 +502,7 @@ def main() -> None:
         fig_scale=args.fig_scale,
         max_candles=args.max_candles,
     )
-    print(f"Saved mplfinance chart to {output_path}")
+    print(f"{output_path}")
 
 
 if __name__ == "__main__":
