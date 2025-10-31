@@ -1,0 +1,226 @@
+{
+  "name": "getListAndSend",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        256,
+        32
+      ],
+      "id": "a6df72ba-64ef-474c-bfe9-560610e5067f",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "349139416",
+        "binaryData": true,
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1072,
+        272
+      ],
+      "id": "59f960f0-9f00-4cea-bf6c-662b908e587c",
+      "name": "Send a photo message",
+      "webhookId": "593f5c3b-2320-4abd-8ccc-42769dfcb81d",
+      "credentials": {
+        "telegramApi": {
+          "id": "J86srUNxXur7UlNv",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "cd /data/n8n-data/ && /opt/py312/bin/python check-chartink.py"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        480,
+        32
+      ],
+      "id": "e1d168c9-41e2-4e27-adb6-f3393a4ec117",
+      "name": "Get condition matched stocks"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "eea7a26d-4882-4138-8966-9ede83272d35",
+              "name": "stocklist",
+              "value": "={{ $json.stdout.parseJson().symbols }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        688,
+        32
+      ],
+      "id": "80aeb5ba-d0e8-4e4f-96d3-436f23ed7cdc",
+      "name": "Extract StockList"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "stocklist",
+        "options": {
+          "destinationFieldName": "stockname"
+        }
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        896,
+        32
+      ],
+      "id": "d5173146-6e3a-4e4e-ad91-b07a8df3f381",
+      "name": "Split stocknames from list"
+    },
+    {
+      "parameters": {
+        "executeOnce": false,
+        "command": "=cd /data/n8n-data && /opt/py312/bin/python fetch_chartink_ohlc.py --symbol {{ $json.stockname }} --timezone Asia/Kolkata"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        32
+      ],
+      "id": "c666725c-3791-4f40-9023-2897939a80c8",
+      "name": "Generate Chart for each stock"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "stdout",
+        "options": {
+          "destinationFieldName": "stockimage"
+        }
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        496,
+        272
+      ],
+      "id": "689d2cba-0747-4dbb-aae3-e6f15b700188",
+      "name": "Split StockImageNames"
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ $json.stockimage }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        784,
+        272
+      ],
+      "id": "0da7cfa2-5cd6-4993-b2cf-d78fd500512e",
+      "name": "Read/Write Files from Disk"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get condition matched stocks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get condition matched stocks": {
+      "main": [
+        [
+          {
+            "node": "Extract StockList",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract StockList": {
+      "main": [
+        [
+          {
+            "node": "Split stocknames from list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split stocknames from list": {
+      "main": [
+        [
+          {
+            "node": "Generate Chart for each stock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Chart for each stock": {
+      "main": [
+        [
+          {
+            "node": "Split StockImageNames",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split StockImageNames": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "Send a photo message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6b8fa8d7-1e4e-40dd-a34f-08109a32113f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4dc5fe9d701c263433ba11afef97ae492e808c8b755bdce83092d482e616bc97"
+  },
+  "id": "tn0UN9gC3Ef8egu6",
+  "tags": []
+}
