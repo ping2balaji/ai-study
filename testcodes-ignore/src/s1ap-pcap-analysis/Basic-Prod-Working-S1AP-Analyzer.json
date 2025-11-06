@@ -1,5 +1,5 @@
 {
-  "name": "Basic-Working-S1AP-Analyzer",
+  "name": "Basic-Prod-S1AP-Analysis-Working",
   "nodes": [
     {
       "parameters": {
@@ -30,7 +30,7 @@
           "respondWithOptions": {
             "values": {
               "respondWith": "redirect",
-              "redirectUrl": "http://192.168.201.88:5678/webhook/results"
+              "redirectUrl": "http://192.168.201.88:5678/webhook/resultsb"
             }
           }
         }
@@ -259,7 +259,7 @@
     },
     {
       "parameters": {
-        "path": "results",
+        "path": "resultsb",
         "responseMode": "responseNode",
         "options": {}
       },
@@ -488,7 +488,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "d40a1747-0a7d-4f7f-9a8f-0071f346303e",
+  "versionId": "c6d78f01-3221-4380-b6f1-9c6c863e2cc5",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "99b1b372e11512afbc48dc793f25c09c2d0ef3da59aea3dc6aa6fd4b57691f66"
