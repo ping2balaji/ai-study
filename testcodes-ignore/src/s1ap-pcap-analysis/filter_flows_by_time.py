@@ -7,8 +7,8 @@ Inputs:
 - Start and end time bounds
 
 Filtering:
-- Default mode "contained": keep flows where start_time >= START and end_time <= END.
-- Mode "overlap": keep flows that intersect the interval [START, END].
+- Provide --start/--end together to restrict by time (default mode "contained": keep flows with start_time >= START and end_time <= END; mode "overlap": keep flows intersecting the interval [START, END]).
+- If --start/--end are omitted, all flows are retained prior to any other filters (e.g., --failed-flows-only).
 
 Time formats accepted for --start/--end:
 - Epoch seconds (e.g., 1695205007.123)
@@ -19,7 +19,7 @@ Usage:
   python testcodes-ignore/src/filter_flows_by_time.py \
     --flows testcodes-ignore/sample-pcap/session-flows-20250920-113704.json \
     --pcap  testcodes-ignore/sample-pcap/sample-s1ap.s1ap-only.pcapng \
-    --start 2025-09-17T18:50:00Z --end 2025-09-17T19:00:00Z \
+    [--start 2025-09-17T18:50:00Z --end 2025-09-17T19:00:00Z] \
     [--mode contained|overlap] [--tshark "C:\\Program Files\\Wireshark\\tshark.exe"] \
     [--out path/to/output.json] [--debug] [--showtime] [--showframenum]
 
@@ -190,6 +190,28 @@ TSHARK_SUMMARY_FIELDS = [
     "s1ap.CellIdentity",
     "_ws.col.Info",
 ]
+
+FAILURE_TERMS = (
+    "radio-connection-with-ue-lost",
+    "rejected",
+    "reject",
+    "failure",
+    "fail",
+    "abort",
+    "error",
+)
+
+
+def row_has_failure(csv_line: str) -> bool:
+    """Return True when the _ws.col.Info field hints at a failed S1AP procedure."""
+    try:
+        row = next(csv.reader([csv_line], delimiter=",", quotechar='"'))
+    except Exception:
+        return False
+    if not row:
+        return False
+    info = row[-1].strip().lower()
+    return any(term in info for term in FAILURE_TERMS)
 
 
 def tshark_csv_for_frames(tshark: str, pcap: str, frames: List[int], *, debug: bool = False) -> Tuple[Optional[str], List[str]]:
@@ -410,8 +432,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Filter session flows JSON by time range.")
     ap.add_argument("--flows", required=True, help="Input flows JSON (from group_s1ap_flows.py)")
     ap.add_argument("--pcap", required=True, help="S1AP-only pcap (used if times need filling)")
-    ap.add_argument("--start", required=True, type=parse_time, help="Start time (epoch or ISO 8601)")
-    ap.add_argument("--end", required=True, type=parse_time, help="End time (epoch or ISO 8601)")
+    ap.add_argument("--start", type=parse_time, help="Start time (epoch or ISO 8601)")
+    ap.add_argument("--end", type=parse_time, help="End time (epoch or ISO 8601)")
     ap.add_argument("--mode", choices=["contained", "overlap"], default="contained", help="Filter mode")
     ap.add_argument("--tshark", default="tshark", help="Path to tshark (if times need filling)")
     ap.add_argument(
@@ -435,6 +457,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Include frames[] array in each output flow",
     )
+    ap.add_argument(
+        "--failed-flows-only",
+        action="store_true",
+        help="Limit output to flows whose packet summaries show S1AP failures",
+    )
     args = ap.parse_args(argv)
 
     if not os.path.exists(args.flows):
@@ -443,7 +470,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not os.path.exists(args.pcap):
         print(f"PCAP not found: {args.pcap}", file=sys.stderr)
         return 2
-    if args.start > args.end:
+    if (args.start is None) ^ (args.end is None):
+        print("Provide both --start and --end to limit by time, or omit both to include all flows", file=sys.stderr)
+        return 2
+    start_bound = float(args.start) if args.start is not None else None
+    end_bound = float(args.end) if args.end is not None else None
+    if start_bound is not None and start_bound > end_bound:
         print("Start time must be <= end time", file=sys.stderr)
         return 2
 
@@ -473,28 +505,31 @@ def main(argv: Optional[List[str]] = None) -> int:
             except Exception as e:
                 print(f"Failed to fill times from pcap: {e}", file=sys.stderr)
 
-    start = float(args.start)
-    end = float(args.end)
-    if args.debug:
-        start_iso = datetime.fromtimestamp(start, tz=timezone.utc).isoformat()
-        end_iso = datetime.fromtimestamp(end, tz=timezone.utc).isoformat()
-        print(f"[DEBUG] Filtering flows: total={len(flows)} start={start} ({start_iso}) end={end} ({end_iso}) mode={args.mode}", file=sys.stderr)
+    if start_bound is not None and end_bound is not None:
+        if args.debug:
+            start_iso = datetime.fromtimestamp(start_bound, tz=timezone.utc).isoformat()
+            end_iso = datetime.fromtimestamp(end_bound, tz=timezone.utc).isoformat()
+            print(f"[DEBUG] Filtering flows: total={len(flows)} start={start_bound} ({start_iso}) end={end_bound} ({end_iso}) mode={args.mode}", file=sys.stderr)
 
-    def keep(flow: dict) -> bool:
-        st = flow.get("start_time")
-        en = flow.get("end_time")
-        if st is None or en is None:
-            return False
-        st = float(st)
-        en = float(en)
-        if args.mode == "contained":
-            return st >= start and en <= end
-        else:  # overlap
-            return not (en < start or st > end)
+        def keep(flow: dict) -> bool:
+            st = flow.get("start_time")
+            en = flow.get("end_time")
+            if st is None or en is None:
+                return False
+            st = float(st)
+            en = float(en)
+            if args.mode == "contained":
+                return st >= start_bound and en <= end_bound
+            else:  # overlap
+                return not (en < start_bound or st > end_bound)
 
-    filtered = [f for f in flows if keep(f)]
-    if args.debug:
-        print(f"[DEBUG] Filtered flows kept: {len(filtered)}", file=sys.stderr)
+        filtered = [f for f in flows if keep(f)]
+        if args.debug:
+            print(f"[DEBUG] Filtered flows kept: {len(filtered)}", file=sys.stderr)
+    else:
+        filtered = list(flows)
+        if args.debug:
+            print(f"[DEBUG] No time bounds provided; keeping all {len(filtered)} flows", file=sys.stderr)
 
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     # Place output next to the flows JSON by default
@@ -537,6 +572,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         t1 = time.perf_counter()
         if args.debug:
             print(f"[DEBUG] Built frame->CSV map in {t1 - t0:.3f}s (rows={len(rows_by_frame)})", file=sys.stderr)
+
+    if args.failed_flows_only:
+        if not rows_by_frame:
+            filtered = []
+        else:
+            failure_frames = {
+                frame_no
+                for frame_no, line in rows_by_frame.items()
+                if row_has_failure(line)
+            }
+
+            def flow_has_failure(flow: dict) -> bool:
+                for n in flow.get("frames") or []:
+                    try:
+                        frame_no = int(n)
+                    except Exception:
+                        continue
+                    if frame_no in failure_frames:
+                        return True
+                return False
+
+            filtered = [f for f in filtered if flow_has_failure(f)]
+        if args.debug:
+            print(f"[DEBUG] Failed-flow filter kept: {len(filtered)}", file=sys.stderr)
 
     enriched: List[dict] = []
     for idx, flow in enumerate(filtered, start=1):
